@@ -1,0 +1,37 @@
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+
+# Testing
+.pytest_cache/
+
+# Linting
+.ruff_cache/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+
+# Lock files (optional - uncomment if you want to track uv.lock)
+# uv.lock

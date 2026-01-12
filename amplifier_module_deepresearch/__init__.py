@@ -1,0 +1,348 @@
+"""Deep Research module for Amplifier.
+
+Multi-provider deep research capabilities supporting:
+- OpenAI Deep Research (o3-deep-research, o4-mini-deep-research)
+- Anthropic Deep Research (Claude with iterative web search)
+
+Usage:
+    # In bundle configuration
+    providers:
+      - module: deepresearch
+        config:
+          provider: openai  # or anthropic
+          default_model: o3-deep-research
+
+    # Programmatic usage
+    from amplifier_module_deepresearch import DeepResearchProvider
+
+    provider = DeepResearchProvider(
+        openai_api_key="...",
+        anthropic_api_key="...",
+        default_provider="openai",
+    )
+
+    result = await provider.research(
+        query="Research the economic impact of AI on healthcare",
+        enable_code_interpreter=True,
+    )
+"""
+
+import logging
+import os
+from typing import Any
+
+from ._constants import (
+    ANTHROPIC_DEFAULT_MODEL,
+    OPENAI_DEFAULT_MODEL,
+    TaskComplexity,
+)
+from ._constants import (
+    DeepResearchProvider as DeepResearchProviderEnum,
+)
+from ._prompt_utils import (
+    estimate_task_complexity,
+    generate_clarifying_questions,
+    rewrite_research_prompt,
+    select_provider,
+)
+from .providers import (
+    AnthropicDeepResearchProvider,
+    Citation,
+    CodeExecutionStep,
+    DeepResearchProviderBase,
+    DeepResearchRequest,
+    DeepResearchResult,
+    FileSearchStep,
+    OpenAIDeepResearchProvider,
+    ReasoningStep,
+    WebSearchStep,
+)
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    # Main class
+    "DeepResearchProvider",
+    # Data classes
+    "DeepResearchRequest",
+    "DeepResearchResult",
+    "Citation",
+    "ReasoningStep",
+    "WebSearchStep",
+    "FileSearchStep",
+    "CodeExecutionStep",
+    # Enums
+    "DeepResearchProviderEnum",
+    "TaskComplexity",
+    # Utilities
+    "estimate_task_complexity",
+    "select_provider",
+    "generate_clarifying_questions",
+    "rewrite_research_prompt",
+    # Mount function
+    "mount",
+]
+
+
+class DeepResearchProvider:
+    """Unified deep research provider supporting multiple backends.
+
+    Automatically selects the best provider based on:
+    - Available credentials
+    - Query requirements (vector stores, MCP servers)
+    - User preferences (speed, cost)
+
+    Example:
+        provider = DeepResearchProvider(
+            openai_api_key=os.environ["OPENAI_API_KEY"],
+            anthropic_api_key=os.environ["ANTHROPIC_API_KEY"],
+        )
+
+        result = await provider.research(
+            query="Research quantum computing applications in drug discovery",
+            task_complexity="high",
+        )
+
+        print(result.report_text)
+        for citation in result.citations:
+            print(f"  - {citation.title}: {citation.url}")
+    """
+
+    def __init__(
+        self,
+        openai_api_key: str | None = None,
+        anthropic_api_key: str | None = None,
+        *,
+        default_provider: str | None = None,
+        default_model: str | None = None,
+        timeout: float | None = None,
+        debug: bool = False,
+    ):
+        """Initialize the deep research provider.
+
+        Args:
+            openai_api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
+            anthropic_api_key: Anthropic API key (defaults to ANTHROPIC_API_KEY env var)
+            default_provider: Preferred provider: 'openai' or 'anthropic'
+            default_model: Default model to use
+            timeout: Request timeout in seconds
+            debug: Enable debug logging
+        """
+        # Get API keys from environment if not provided
+        openai_key = openai_api_key or os.environ.get("OPENAI_API_KEY")
+        anthropic_key = anthropic_api_key or os.environ.get("ANTHROPIC_API_KEY")
+
+        # Initialize available providers
+        self._providers: dict[str, DeepResearchProviderBase] = {}
+
+        if openai_key:
+            self._providers["openai"] = OpenAIDeepResearchProvider(
+                api_key=openai_key,
+                timeout=timeout or 600.0,
+                debug=debug,
+            )
+
+        if anthropic_key:
+            self._providers["anthropic"] = AnthropicDeepResearchProvider(
+                api_key=anthropic_key,
+                timeout=timeout or 300.0,
+                debug=debug,
+            )
+
+        if not self._providers:
+            raise ValueError("No API keys provided - need OPENAI_API_KEY or ANTHROPIC_API_KEY")
+
+        # Set defaults
+        self._default_provider = default_provider
+        self._default_model = default_model
+        self._debug = debug
+
+    @property
+    def available_providers(self) -> list[str]:
+        """List available providers."""
+        return list(self._providers.keys())
+
+    async def list_models(self) -> dict[str, list[dict[str, Any]]]:
+        """List available models from all providers."""
+        result = {}
+        for name, provider in self._providers.items():
+            result[name] = await provider.list_models()
+        return result
+
+    async def research(
+        self,
+        query: str,
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        instructions: str | None = None,
+        task_complexity: str = "medium",
+        max_iterations: int | None = None,
+        max_output_tokens: int | None = None,
+        reasoning_summary: str = "auto",
+        enable_web_search: bool = True,
+        enable_code_interpreter: bool = False,
+        enable_file_search: bool = False,
+        vector_store_ids: list[str] | None = None,
+        mcp_servers: list[dict[str, Any]] | None = None,
+        background: bool = False,
+        max_tool_calls: int | None = None,
+        timeout: float | None = None,
+        prefer_speed: bool = False,
+        prefer_cost: bool = False,
+    ) -> DeepResearchResult:
+        """Execute a deep research request.
+
+        Args:
+            query: The research question or topic
+            provider: Force specific provider ('openai' or 'anthropic')
+            model: Specific model to use
+            instructions: System instructions for the research task
+            task_complexity: Complexity level: 'low', 'medium', 'high'
+            max_iterations: Max search iterations (Anthropic)
+            max_output_tokens: Maximum tokens in response
+            reasoning_summary: Summary mode: 'auto', 'concise', 'detailed'
+            enable_web_search: Enable web search (default True)
+            enable_code_interpreter: Enable code execution (OpenAI)
+            enable_file_search: Enable file search over vector stores (OpenAI)
+            vector_store_ids: Vector store IDs for file search (OpenAI)
+            mcp_servers: MCP server configs for private data (OpenAI)
+            background: Run in background mode (OpenAI)
+            max_tool_calls: Limit tool calls for cost control (OpenAI)
+            timeout: Request timeout in seconds
+            prefer_speed: Prefer faster providers/models
+            prefer_cost: Prefer cost-effective providers/models
+
+        Returns:
+            DeepResearchResult with report text, citations, and metadata
+        """
+        # Select provider
+        provider_name = self._select_provider(
+            provider=provider,
+            has_vector_stores=bool(vector_store_ids),
+            has_mcp_servers=bool(mcp_servers),
+            prefer_speed=prefer_speed,
+            prefer_cost=prefer_cost,
+            query=query,
+        )
+
+        provider_impl = self._providers.get(provider_name)
+        if not provider_impl:
+            available = ", ".join(self._providers.keys())
+            raise ValueError(f"Provider '{provider_name}' not available. Available: {available}")
+
+        # Select model
+        selected_model = model or self._default_model
+        if not selected_model:
+            if provider_name == "openai":
+                selected_model = "o4-mini-deep-research" if prefer_speed else OPENAI_DEFAULT_MODEL
+            else:
+                selected_model = ANTHROPIC_DEFAULT_MODEL
+
+        # Build request
+        request = DeepResearchRequest(
+            query=query,
+            model=selected_model,
+            instructions=instructions,
+            task_complexity=task_complexity,
+            max_iterations=max_iterations,
+            max_output_tokens=max_output_tokens,
+            reasoning_summary=reasoning_summary,
+            enable_web_search=enable_web_search,
+            enable_code_interpreter=enable_code_interpreter,
+            enable_file_search=enable_file_search,
+            vector_store_ids=vector_store_ids or [],
+            mcp_servers=mcp_servers or [],
+            background=background,
+            max_tool_calls=max_tool_calls,
+            timeout=timeout,
+        )
+
+        logger.info(f"[DeepResearch] Using provider={provider_name}, model={selected_model}")
+
+        return await provider_impl.research(request)
+
+    def _select_provider(
+        self,
+        provider: str | None,
+        has_vector_stores: bool,
+        has_mcp_servers: bool,
+        prefer_speed: bool,
+        prefer_cost: bool,
+        query: str,
+    ) -> str:
+        """Select the best provider for the request."""
+        # Explicit provider requested
+        if provider:
+            if provider not in self._providers:
+                available = ", ".join(self._providers.keys())
+                raise ValueError(f"Provider '{provider}' not available. Available: {available}")
+            return provider
+
+        # Default provider configured
+        if self._default_provider and self._default_provider in self._providers:
+            return self._default_provider
+
+        # Only one provider available
+        if len(self._providers) == 1:
+            return list(self._providers.keys())[0]
+
+        # Use selection heuristics
+        selected = select_provider(
+            query=query,
+            has_vector_stores=has_vector_stores,
+            has_mcp_servers=has_mcp_servers,
+            prefer_speed=prefer_speed,
+            prefer_cost=prefer_cost,
+        )
+
+        # Verify selected provider is available
+        if selected not in self._providers:
+            # Fall back to first available
+            return list(self._providers.keys())[0]
+
+        return selected
+
+
+def mount(coordinator: Any, config: dict[str, Any]) -> None:
+    """Mount the deep research module into the Amplifier coordinator.
+
+    This registers the deep research provider with the coordinator,
+    making it available for use in the agent loop.
+
+    Args:
+        coordinator: The Amplifier coordinator instance
+        config: Module configuration including:
+            - provider: Default provider ('openai' or 'anthropic')
+            - default_model: Default model to use
+            - timeout: Request timeout
+            - debug: Enable debug logging
+    """
+    # Extract configuration
+    default_provider = config.get("provider")
+    default_model = config.get("default_model")
+    timeout = config.get("timeout")
+    debug = config.get("debug", False)
+
+    # Get API keys from config or environment
+    openai_api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY")
+    anthropic_api_key = config.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
+
+    # Create the provider
+    provider = DeepResearchProvider(
+        openai_api_key=openai_api_key,
+        anthropic_api_key=anthropic_api_key,
+        default_provider=default_provider,
+        default_model=default_model,
+        timeout=timeout,
+        debug=debug,
+    )
+
+    # Register with coordinator
+    # The exact registration API depends on amplifier-core
+    if hasattr(coordinator, "register_provider"):
+        coordinator.register_provider("deepresearch", provider)
+    elif hasattr(coordinator, "providers"):
+        coordinator.providers["deepresearch"] = provider
+
+    logger.info(f"[DeepResearch] Mounted with providers: {provider.available_providers}")
