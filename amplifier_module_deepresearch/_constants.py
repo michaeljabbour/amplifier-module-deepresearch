@@ -48,11 +48,13 @@ OPENAI_DEFAULT_MAX_TOKENS = 100000
 
 # Anthropic models for deep research
 ANTHROPIC_MODELS = [
-    "claude-sonnet-4-5-20250514",
+    "claude-sonnet-4-5-20250929",  # Latest Claude Sonnet 4.5
+    "claude-sonnet-4-5",  # Alias (auto-updates)
+    "claude-opus-4-5-20251101",  # Premium model
 ]
 
 # Default Anthropic model for research
-ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-5-20250514"
+ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 
 # Anthropic timeout
 ANTHROPIC_DEFAULT_TIMEOUT = 300.0
