@@ -49,8 +49,6 @@ OPENAI_DEFAULT_MAX_TOKENS = 100000
 # Anthropic models for deep research
 ANTHROPIC_MODELS = [
     "claude-sonnet-4-5-20250514",
-    "claude-3-7-sonnet-latest",
-    "claude-3-5-sonnet-latest",
 ]
 
 # Default Anthropic model for research

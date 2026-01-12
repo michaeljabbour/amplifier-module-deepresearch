@@ -98,9 +98,7 @@ result = await provider.research(
 
 Uses Claude with iterative web search and extended thinking:
 
-- `claude-sonnet-4-5-20250514`: Latest with extended thinking
-- `claude-3-7-sonnet-latest`: Claude 3.7 with thinking
-- `claude-3-5-sonnet-latest`: Fast option
+- `claude-sonnet-4-5-20250514`: Claude Sonnet 4.5 with extended thinking
 
 ### Features
 
