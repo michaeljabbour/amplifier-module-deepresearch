@@ -26,9 +26,7 @@ from typing import Any
 
 from ._constants import (
     ANTHROPIC_DEFAULT_MODEL,
-    ANTHROPIC_MODELS,
     OPENAI_DEFAULT_MODEL,
-    OPENAI_MODELS,
     TaskComplexity,
 )
 from ._constants import (
@@ -228,23 +226,16 @@ class DeepResearchProvider:
             available = ", ".join(self._providers.keys())
             raise ValueError(f"Provider '{provider_name}' not available. Available: {available}")
 
-        # Select model - must be compatible with selected provider
+        # Select model - each provider has its own defaults
+        # The tool is self-contained and makes its own API calls,
+        # so default_model only applies when using the default_provider
         selected_model = model  # Explicit model parameter takes precedence
         if not selected_model:
-            # Check if default_model is compatible with selected provider
-            if self._default_model:
-                if provider_name == "openai" and self._default_model in OPENAI_MODELS:
-                    selected_model = self._default_model
-                elif provider_name == "anthropic" and self._default_model in ANTHROPIC_MODELS:
-                    selected_model = self._default_model
-                else:
-                    logger.warning(
-                        f"Model {self._default_model} not in known models list: "
-                        f"{OPENAI_MODELS if provider_name == 'openai' else ANTHROPIC_MODELS}"
-                    )
-
-            # Fall back to provider-specific defaults
-            if not selected_model:
+            # Only use configured default_model if we're using the default_provider
+            if self._default_model and provider_name == self._default_provider:
+                selected_model = self._default_model
+            else:
+                # Use provider-specific defaults
                 if provider_name == "openai":
                     selected_model = "o4-mini-deep-research" if prefer_speed else OPENAI_DEFAULT_MODEL
                 else:
