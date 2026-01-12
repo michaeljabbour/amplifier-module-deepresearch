@@ -15,7 +15,7 @@ Multi-provider deep research module for Amplifier, enabling automated research w
 ## Installation
 
 ```bash
-uv add git+https://github.com/microsoft/amplifier-module-deepresearch
+uv add git+https://github.com/michaeljabbour/amplifier-module-deepresearch
 ```
 
 ## Quick Start
@@ -98,7 +98,7 @@ result = await provider.research(
 
 Uses Claude with iterative web search and extended thinking:
 
-- `claude-sonnet-4-5-20250514`: Claude Sonnet 4.5 with extended thinking
+- `claude-sonnet-4-5-20250929`: Claude Sonnet 4.5 with extended thinking
 
 ### Features
 
@@ -148,13 +148,16 @@ complexity = estimate_task_complexity(query)  # low/medium/high
 
 ### Bundle Configuration
 
+Add to your bundle's `tools:` section:
+
 ```yaml
-providers:
-  - module: deepresearch
+tools:
+  - module: tool-deepresearch
+    source: git+https://github.com/michaeljabbour/amplifier-module-deepresearch@main
     config:
-      provider: openai
-      default_model: o3-deep-research
-      timeout: 600
+      default_provider: anthropic    # or "openai"
+      default_model: claude-sonnet-4-5-20250929  # optional, provider uses its default
+      timeout: 600                   # seconds (default: 600)
 ```
 
 ### Programmatic Mount
@@ -162,10 +165,20 @@ providers:
 ```python
 from amplifier_module_deepresearch import mount
 
-mount(coordinator, {
-    "provider": "openai",
-    "default_model": "o3-deep-research",
+await mount(coordinator, {
+    "default_provider": "anthropic",
+    "timeout": 600,
 })
+```
+
+### Usage in Session
+
+Once mounted, the `deep_research` tool is available to the LLM:
+
+```
+Use deep research to analyze the current state of quantum computing
+Use deep research with openai to find recent news about Tesla
+Use deep research with anthropic and task_complexity high to research mRNA vaccines
 ```
 
 ## Response Structure
