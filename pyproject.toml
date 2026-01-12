@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.entry-points."amplifier.modules"]
-deepresearch = "amplifier_module_deepresearch:mount"
+tool-deepresearch = "amplifier_module_deepresearch:mount"
 
 [build-system]
 requires = [

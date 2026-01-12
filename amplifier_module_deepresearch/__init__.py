@@ -1,4 +1,4 @@
-"""Deep Research module for Amplifier.
+"""Deep Research tool module for Amplifier.
 
 Multi-provider deep research capabilities supporting:
 - OpenAI Deep Research (o3-deep-research, o4-mini-deep-research)
@@ -6,26 +6,19 @@ Multi-provider deep research capabilities supporting:
 
 Usage:
     # In bundle configuration
-    providers:
-      - module: deepresearch
+    tools:
+      - module: tool-deepresearch
+        source: git+https://github.com/michaeljabbour/amplifier-module-deepresearch@main
         config:
-          provider: openai  # or anthropic
-          default_model: o3-deep-research
+          default_provider: anthropic  # or openai
+          default_model: claude-sonnet-4-5
 
-    # Programmatic usage
-    from amplifier_module_deepresearch import DeepResearchProvider
-
-    provider = DeepResearchProvider(
-        openai_api_key="...",
-        anthropic_api_key="...",
-        default_provider="openai",
-    )
-
-    result = await provider.research(
-        query="Research the economic impact of AI on healthcare",
-        enable_code_interpreter=True,
-    )
+    # The LLM can then call:
+    deep_research(query="What are the latest advances in quantum computing?")
 """
+
+# Amplifier module metadata
+__amplifier_module_type__ = "tool"
 
 import logging
 import os
@@ -63,6 +56,8 @@ logger = logging.getLogger(__name__)
 __all__ = [
     # Main class
     "DeepResearchProvider",
+    # Tool class
+    "DeepResearchTool",
     # Data classes
     "DeepResearchRequest",
     "DeepResearchResult",
@@ -304,45 +299,185 @@ class DeepResearchProvider:
         return selected
 
 
-def mount(coordinator: Any, config: dict[str, Any]) -> None:
-    """Mount the deep research module into the Amplifier coordinator.
+class DeepResearchTool:
+    """Amplifier tool for deep research capabilities.
 
-    This registers the deep research provider with the coordinator,
-    making it available for use in the agent loop.
+    This tool allows the LLM to perform comprehensive research on topics
+    using either OpenAI's deep research models or Anthropic's Claude with
+    iterative web search.
+    """
+
+    name = "deep_research"
+    description = """Perform deep research on a topic using AI-powered web search and analysis.
+
+This tool conducts comprehensive research by:
+1. Searching the web for relevant information
+2. Analyzing and synthesizing findings
+3. Producing a detailed report with citations
+
+Use this for questions requiring:
+- In-depth analysis of complex topics
+- Current information from the web
+- Multiple source synthesis
+- Comprehensive reports with citations
+
+The research may take 1-5 minutes depending on complexity."""
+
+    def __init__(self, config: dict[str, Any]):
+        """Initialize the deep research tool.
+
+        Args:
+            config: Tool configuration including:
+                - default_provider: 'openai' or 'anthropic'
+                - default_model: Model to use
+                - timeout: Request timeout
+                - debug: Enable debug logging
+        """
+        self.config = config
+        self._provider: DeepResearchProvider | None = None
+
+    def _get_provider(self) -> DeepResearchProvider:
+        """Lazily initialize the provider."""
+        if self._provider is None:
+            self._provider = DeepResearchProvider(
+                openai_api_key=self.config.get("openai_api_key"),
+                anthropic_api_key=self.config.get("anthropic_api_key"),
+                default_provider=self.config.get("default_provider"),
+                default_model=self.config.get("default_model"),
+                timeout=self.config.get("timeout"),
+                debug=self.config.get("debug", False),
+            )
+        return self._provider
+
+    @property
+    def input_schema(self) -> dict:
+        """Return JSON schema for tool parameters."""
+        return {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "The research question or topic to investigate",
+                },
+                "provider": {
+                    "type": "string",
+                    "enum": ["openai", "anthropic"],
+                    "description": "Force a specific provider (optional, auto-selected by default)",
+                },
+                "task_complexity": {
+                    "type": "string",
+                    "enum": ["low", "medium", "high"],
+                    "default": "medium",
+                    "description": "Complexity level affecting depth of research",
+                },
+                "instructions": {
+                    "type": "string",
+                    "description": "Additional instructions for the research task (optional)",
+                },
+                "enable_code_interpreter": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Enable code execution for data analysis (OpenAI only)",
+                },
+                "prefer_speed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Prefer faster models/providers over thoroughness",
+                },
+                "prefer_cost": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Prefer cost-effective models/providers",
+                },
+            },
+            "required": ["query"],
+        }
+
+    async def execute(self, input: dict[str, Any]) -> Any:
+        """Execute deep research.
+
+        Args:
+            input: Tool input containing query and options
+
+        Returns:
+            ToolResult with research report and citations
+        """
+        # Import here to avoid circular imports
+        from amplifier_core import ToolResult
+
+        query = input.get("query")
+        if not query:
+            return ToolResult(success=False, error={"message": "Query is required"})
+
+        try:
+            provider = self._get_provider()
+
+            result = await provider.research(
+                query=query,
+                provider=input.get("provider"),
+                instructions=input.get("instructions"),
+                task_complexity=input.get("task_complexity", "medium"),
+                enable_code_interpreter=input.get("enable_code_interpreter", False),
+                prefer_speed=input.get("prefer_speed", False),
+                prefer_cost=input.get("prefer_cost", False),
+            )
+
+            # Format citations for output
+            citations_list = []
+            for citation in result.citations:
+                citations_list.append(
+                    {
+                        "title": citation.title,
+                        "url": citation.url,
+                    }
+                )
+
+            return ToolResult(
+                success=True,
+                output={
+                    "report": result.report_text,
+                    "citations": citations_list,
+                    "provider": result.provider,
+                    "model": result.model,
+                    "metadata": result.to_metadata_dict(),
+                },
+            )
+
+        except ValueError as e:
+            return ToolResult(success=False, error={"message": str(e)})
+        except Exception as e:
+            logger.exception(f"Deep research error: {e}")
+            return ToolResult(success=False, error={"message": f"Research failed: {e}"})
+
+
+async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
+    """Mount the deep research tool into the Amplifier coordinator.
+
+    This registers the deep_research tool with the coordinator,
+    making it available for the LLM to call.
 
     Args:
         coordinator: The Amplifier coordinator instance
         config: Module configuration including:
-            - provider: Default provider ('openai' or 'anthropic')
+            - default_provider: Default provider ('openai' or 'anthropic')
             - default_model: Default model to use
             - timeout: Request timeout
             - debug: Enable debug logging
     """
-    # Extract configuration
-    default_provider = config.get("provider")
-    default_model = config.get("default_model")
-    timeout = config.get("timeout")
-    debug = config.get("debug", False)
+    config = config or {}
 
     # Get API keys from config or environment
-    openai_api_key = config.get("openai_api_key") or os.environ.get("OPENAI_API_KEY")
-    anthropic_api_key = config.get("anthropic_api_key") or os.environ.get("ANTHROPIC_API_KEY")
+    if "openai_api_key" not in config:
+        config["openai_api_key"] = os.environ.get("OPENAI_API_KEY")
+    if "anthropic_api_key" not in config:
+        config["anthropic_api_key"] = os.environ.get("ANTHROPIC_API_KEY")
 
-    # Create the provider
-    provider = DeepResearchProvider(
-        openai_api_key=openai_api_key,
-        anthropic_api_key=anthropic_api_key,
-        default_provider=default_provider,
-        default_model=default_model,
-        timeout=timeout,
-        debug=debug,
-    )
+    # Check we have at least one API key
+    if not config.get("openai_api_key") and not config.get("anthropic_api_key"):
+        logger.warning("[DeepResearch] No API keys found - tool will fail at runtime")
 
-    # Register with coordinator
-    # The exact registration API depends on amplifier-core
-    if hasattr(coordinator, "register_provider"):
-        coordinator.register_provider("deepresearch", provider)
-    elif hasattr(coordinator, "providers"):
-        coordinator.providers["deepresearch"] = provider
+    # Create and mount the tool
+    tool = DeepResearchTool(config)
+    await coordinator.mount("tools", tool, name=tool.name)
 
-    logger.info(f"[DeepResearch] Mounted with providers: {provider.available_providers}")
+    logger.info("[DeepResearch] Mounted deep_research tool")
