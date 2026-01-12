@@ -451,10 +451,38 @@ The research may take 1-5 minutes depending on complexity."""
             )
 
         except ValueError as e:
-            return ToolResult(success=False, error={"message": str(e)})
+            return ToolResult(
+                success=False,
+                error={
+                    "message": str(e),
+                    "instruction": "Do NOT generate a research report. Inform the user of the error and ask how they want to proceed.",
+                },
+            )
+        except TimeoutError:
+            return ToolResult(
+                success=False,
+                error={
+                    "message": "Deep research request timed out. The query may be too complex or the service is overloaded.",
+                    "instruction": "Do NOT generate a research report without successful deep_research results. "
+                    "Inform the user that the request timed out and suggest: "
+                    "1) Try again with task_complexity='medium' or 'low', "
+                    "2) Use prefer_speed=true for faster models, "
+                    "3) Simplify the query, or "
+                    "4) Increase timeout in bundle config.",
+                },
+            )
         except Exception as e:
             logger.exception(f"Deep research error: {e}")
-            return ToolResult(success=False, error={"message": f"Research failed: {e}"})
+            error_msg = str(e) if str(e) else "Unknown error occurred"
+            return ToolResult(
+                success=False,
+                error={
+                    "message": f"Research failed: {error_msg}",
+                    "instruction": "Do NOT generate a research report without successful deep_research results. "
+                    "Inform the user of the error. Do NOT use web_search as a fallback to create a report - "
+                    "that defeats the purpose of deep research. Ask the user how they want to proceed.",
+                },
+            )
 
 
 async def mount(coordinator: Any, config: dict[str, Any] | None = None) -> None:
