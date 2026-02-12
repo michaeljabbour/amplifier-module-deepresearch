@@ -1,4 +1,4 @@
-# amplifier-module-deepresearch
+# amplifier-module-tool-deepresearch
 
 Multi-provider deep research module for Amplifier, enabling automated research workflows with comprehensive citation support.
 
@@ -15,7 +15,7 @@ Multi-provider deep research module for Amplifier, enabling automated research w
 ## Installation
 
 ```bash
-uv add git+https://github.com/michaeljabbour/amplifier-module-deepresearch
+uv add git+https://github.com/michaeljabbour/amplifier-module-tool-deepresearch
 ```
 
 ## Quick Start
@@ -153,7 +153,7 @@ Add to your bundle's `tools:` section:
 ```yaml
 tools:
   - module: tool-deepresearch
-    source: git+https://github.com/michaeljabbour/amplifier-module-deepresearch@main
+    source: git+https://github.com/michaeljabbour/amplifier-module-tool-deepresearch@main
     config:
       default_provider: anthropic    # or "openai"
       default_model: claude-sonnet-4-5-20250929  # optional, provider uses its default

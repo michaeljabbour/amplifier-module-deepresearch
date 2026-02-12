@@ -1,5 +1,5 @@
 [project]
-name = "amplifier-module-deepresearch"
+name = "amplifier-module-tool-deepresearch"
 version = "0.1.0"
 description = "Multi-provider deep research module for Amplifier - automated research with OpenAI and Anthropic"
 license = "MIT"
